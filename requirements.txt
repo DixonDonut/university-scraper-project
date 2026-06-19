@@ -4,3 +4,4 @@ openpyxl
 lxml
 pdfminer.six
 urllib3
+playwright

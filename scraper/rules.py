@@ -1,14 +1,18 @@
 # scraper/rules.py
-# Complete rules — naming, concentrations, degree detection, include/exclude
+# Degree rules, naming, NMC flags, include/exclude logic.
+# Works universally for any university.
 
 import re
+from scraper.name_quality import (
+    should_include_by_quality, is_valid_concentration_name,
+    is_hard_excluded, is_nav_noise, is_school_or_unit_name,
+    is_sentence_fragment, DEGREE_QUALITY_SIGNALS,
+)
 
 # ─────────────────────────────────────────────────────────
 # DEGREE ABBREVIATION RULES
 # ─────────────────────────────────────────────────────────
 
-# These get abbreviated ONLY when a subject/major is present
-# Standalone → always write full form
 ABBREVIATIONS = {
     'bachelor of arts':                    'BA',
     'bachelor of science':                 'BSc',
@@ -26,7 +30,7 @@ ABBREVIATIONS = {
     'associate of applied arts':           'AAA',
 }
 
-# These NEVER get abbreviated — always full form even with a subject
+# These degrees never get abbreviated even when subject present
 NO_ABBREVIATION = [
     'bachelor of laws',
     'bachelor of technology',
@@ -46,33 +50,22 @@ NO_ABBREVIATION = [
     'bachelor of international studies',
 ]
 
-# Raw degree strings from university pages → normalise to full form
 DEGREE_NORMALISATIONS = {
-    'b.a.': 'bachelor of arts',
-    'b.a':  'bachelor of arts',
-    'ba ':  'bachelor of arts',
-    'b.s.': 'bachelor of science',
-    'b.s':  'bachelor of science',
-    'bs ':  'bachelor of science',
-    'bsc ': 'bachelor of science',
-    'b.sc': 'bachelor of science',
-    'bfa ': 'bachelor of fine arts',
-    'b.f.a': 'bachelor of fine arts',
+    'b.a.': 'bachelor of arts',      'b.a': 'bachelor of arts',
+    'ba ':  'bachelor of arts',      'b.s.': 'bachelor of science',
+    'b.s':  'bachelor of science',   'bs ': 'bachelor of science',
+    'bsc ': 'bachelor of science',   'b.sc': 'bachelor of science',
+    'bfa ': 'bachelor of fine arts', 'b.f.a': 'bachelor of fine arts',
     'bba ': 'bachelor of business administration',
     'b.b.a': 'bachelor of business administration',
     'bca ': 'bachelor of computer applications',
-    'b.e.': 'bachelor of engineering',
-    'b.e ': 'bachelor of engineering',
-    'beng ': 'bachelor of engineering',
-    'b.eng': 'bachelor of engineering',
+    'b.e.': 'bachelor of engineering', 'b.e ': 'bachelor of engineering',
+    'beng ': 'bachelor of engineering', 'b.eng': 'bachelor of engineering',
     'be in': 'bachelor of engineering in',
-    'llb':  'bachelor of laws',
-    'b.tech': 'bachelor of technology',
-    'btech': 'bachelor of technology',
-    'b.com': 'bachelor of commerce',
-    'bcom': 'bachelor of commerce',
-    'b.ed': 'bachelor of education',
-    'bed ': 'bachelor of education',
+    'llb': 'bachelor of laws',
+    'b.tech': 'bachelor of technology', 'btech': 'bachelor of technology',
+    'b.com': 'bachelor of commerce',   'bcom': 'bachelor of commerce',
+    'b.ed': 'bachelor of education',   'bed ': 'bachelor of education',
     'b.arch': 'bachelor of architecture',
     'b.pharm': 'bachelor of pharmacy',
     'b.sc (hons)': 'bachelor of science',
@@ -80,37 +73,50 @@ DEGREE_NORMALISATIONS = {
     'a.a.': 'associate of arts',
     'a.s.': 'associate of science',
     'a.a.s': 'associate of applied science',
-    'd3': 'diploma iii',
-    'd4': 'diploma iv',
+    'd3': 'diploma iii', 'd4': 'diploma iv',
 }
 
 # ─────────────────────────────────────────────────────────
-# INCLUDE / EXCLUDE KEYWORDS
+# PROJECT-LEVEL EXCLUSIONS
+# These apply to any university — per PROJECT_RULES.md
 # ─────────────────────────────────────────────────────────
 
-EXCLUDE_KEYWORDS = [
+PROJECT_EXCLUSIONS = [
     # Postgraduate
     'm.sc', 'msc ', 'm.s.', ' ms ', 'm.e.', 'm.e ', 'm.tech', 'mtech',
-    'm.pharm', 'mpharm', 'm.b.a', ' mba ', 'm.phil', 'mphil',
+    'm.pharm', 'mpharm', 'm.b.a', ' mba', 'm.phil', 'mphil',
     'master', 'masters', 'postgraduate', 'post-graduate', 'post graduate',
     'phd', 'ph.d', 'doctorate', 'doctoral', 'doctor of',
     'm.com', 'mcom', 'm.ed', ' med ', 'm.arch',
-    # Section headings
-    'higher degree', 'integrated first degree', 'doctoral programme',
-    'online admission', 'practice school',
-    # German
+    # Professional degrees excluded per PROJECT_RULES.md
+    'veterinary medicine', 'doctor of veterinary', 'd.v.m', 'dvm ',
+    'doctor of medicine', 'doctor of dental',
+    # Germany
     'staatsexamen', 'kirchliches',
-    # Spanish
+    # Spain
     'odontolog', 'nivelaci',
-    # Indonesian
-    'kelas karyawan', 'pjj', 'profesi', 'ners', 'apoteker',
+    # Indonesia
+    'kelas karyawan', 'pjj ', 'profesi ', 'ners ', 'apoteker',
     'kelas konversi', 'alih jenjang',
     # Other
-    'dec-bac', 'rn-bsn', 'rnbsn',
+    'dec-bac', 'rn-bsn', 'rnbsn', 'rn to bsn', 'rn-to-bsn',
     'baes', 'basus', 'hnc ',
     'post-graduate diploma', 'graduate certificate', 'conversion class',
-    # Minors and certificates — not standalone programmes
-    ' minor', 'minors', 'certificate only', 'non-degree',
+    # Minors
+    ' minor', 'minors',
+    # WSU / general nav and unit noise
+    'degree finder', 'back to degree',
+    'humane society', 'externship program',
+    'pre-veterinary', 'salmonid',
+    'honors accelerated', 'veterinary microbiology',
+    'veterinary clinical', 'alliance education',
+    # UNR / general noise
+    ' emphasis',
+    'credential assembly',
+    'projected openings',
+    'according to the bls',
+    'free members',
+    'bi-md',
 ]
 
 INCLUDE_DEGREE_TYPES = [
@@ -125,31 +131,6 @@ INCLUDE_DEGREE_TYPES = [
     'higher national diploma', 'hnd in', 'hnd ',
     'diploma iii', 'diploma iv',
 ]
-
-NAV_NOISE = [
-    'home', 'about', 'contact', 'login', 'search', 'menu',
-    'overview', 'apply now', 'news', 'events', 'research',
-    'library', 'sports', 'hostel', 'fees', 'scholarships',
-    'placements', 'alumni', 'portal', 'notice', 'announcement',
-    'dubai', 'hyderabad', 'goa', 'pilani',
-    'higher degree', 'practice school', 'online admissions',
-    'doctoral programmes', 'departments', 'campus', 'giving', 'donate',
-]
-
-NMC_TRIGGERS = {
-    'Korean medium':           ['korean', '한국어'],
-    'Japanese medium':         ['japanese', '日本語', 'nihongo'],
-    'Russian medium':          ['russian', 'русский'],
-    'Chinese medium':          ['chinese', '中文', 'mandarin'],
-    'Architecture 5yr':        ['architecture', 'b.arch'],
-    'Medicine':                ['medicine', 'medical', 'mbbs'],
-    'D3 Indonesia':            ['diploma iii', 'd3 '],
-    'D4 Indonesia':            ['diploma iv', 'd4 '],
-    'Associate/Community Col': ['associate degree', 'aa in', 'as in'],
-    'HND/Foundation':          ['hnd', 'foundation degree', 'fda ', 'fdsc'],
-    'College Diploma Canada':  ['college diploma', 'advanced diploma'],
-    'Unclear degree type':     ['unclear degree', "bachelor's degree in"],
-}
 
 # ─────────────────────────────────────────────────────────
 # CONCENTRATION DETECTION
@@ -182,22 +163,33 @@ CONCENTRATION_INTRO_WORDS = [
     'emphasis', 'emphases',
     'specialization', 'specializations',
     'specialisation', 'specialisations',
-    'option', 'options',
     'pathway', 'pathways',
     'stream', 'streams',
     'strand', 'strands',
     'focus area', 'focus areas',
 ]
 
+NMC_TRIGGERS = {
+    'Korean medium':           ['korean', '한국어'],
+    'Japanese medium':         ['japanese', '日本語', 'nihongo'],
+    'Russian medium':          ['russian', 'русский'],
+    'Chinese medium':          ['chinese', '中文', 'mandarin'],
+    'Architecture 5yr':        ['bachelor of architecture', 'b.arch'],
+    'Medicine':                ['medicine', 'medical', 'mbbs'],
+    'D3 Indonesia':            ['diploma iii', 'd3 '],
+    'D4 Indonesia':            ['diploma iv', 'd4 '],
+    'Associate/Community Col': ['associate of', 'aa in', 'as in', 'aas '],
+    'HND/Foundation':          ['hnd', 'foundation degree', 'fda ', 'fdsc'],
+    'College Diploma Canada':  ['college diploma', 'advanced diploma'],
+}
+
 
 def concentrations_chosen_at_application(page_text):
-    """Returns True if concentrations are declared at application time."""
     text_lower = page_text.lower()
     return any(phrase in text_lower for phrase in APPLICATION_TIME_PHRASES)
 
 
 def concentrations_listed_separately(page_text):
-    """Returns True if page lists concentrations as separate items."""
     text_lower = page_text.lower()
     return any(word in text_lower for word in CONCENTRATION_INTRO_WORDS)
 
@@ -207,7 +199,6 @@ def concentrations_listed_separately(page_text):
 # ─────────────────────────────────────────────────────────
 
 def normalise_degree_type(raw):
-    """Convert raw degree string to standard full form."""
     raw_lower = raw.lower().strip()
     for abbrev, full in DEGREE_NORMALISATIONS.items():
         if raw_lower.startswith(abbrev) or raw_lower == abbrev.strip():
@@ -217,25 +208,17 @@ def normalise_degree_type(raw):
 
 def format_programme_name(degree_type, subject=None, concentration=None):
     """
-    Format a programme name following the naming rules:
-
-    Standalone (no subject):
-      Bachelor of Arts
-
-    With subject:
-      BA in Fine Arts           ← abbreviate if allowed
-      Bachelor of Laws in X     ← never abbreviate
-
-    With subject + concentration:
-      BA in Fine Arts - Graphic Design
+    Format per naming rules:
+    - No subject  → full form:   Bachelor of Arts
+    - With subject → abbreviate: BA in Fine Arts
+    - With conc   → add dash:   BA in Fine Arts - Graphic Design
+    - Never-abbrev → full form: Bachelor of Laws in X
     """
     degree_lower = degree_type.lower().strip()
 
-    # ── Standalone
     if not subject:
         return degree_type.title()
 
-    # ── Never-abbreviate degrees
     for no_abbrev in NO_ABBREVIATION:
         if no_abbrev in degree_lower:
             name = f"{degree_type.title()} in {subject.title()}"
@@ -243,28 +226,24 @@ def format_programme_name(degree_type, subject=None, concentration=None):
                 name += f" - {concentration.title()}"
             return name
 
-    # ── Find abbreviation
     abbrev = None
     for full_form, short in ABBREVIATIONS.items():
         if full_form in degree_lower:
             abbrev = short
             break
 
-    if abbrev:
-        name = f"{abbrev} in {subject.title()}"
-    else:
-        name = f"{degree_type.title()} in {subject.title()}"
+    name = f"{abbrev} in {subject.title()}" if abbrev else f"{degree_type.title()} in {subject.title()}"
 
     if concentration:
         name += f" - {concentration.title()}"
 
+    name = name.replace(' In ', ' in ')
     return name
 
 
 def infer_degree_level_from_duration(duration_text):
     """
-    Infer Bachelor/Associate/Diploma from duration text.
-    Fallback when degree type is unclear.
+    Infer Bachelor/Associate/Diploma from duration with sanity checks.
     """
     if not duration_text:
         return 'Bachelor'
@@ -277,48 +256,87 @@ def infer_degree_level_from_duration(duration_text):
     num = int(numbers[0])
 
     if 'year' in text:
-        if num >= 3:   return 'Bachelor'
-        elif num == 2: return 'Associate'
-        else:          return 'Diploma'
+        if num < 1 or num > 8:   return 'Bachelor'  # sanity check
+        if num >= 3:              return 'Bachelor'
+        elif num == 2:            return 'Associate'
+        else:                     return 'Diploma'
 
     if 'credit' in text or 'unit' in text or 'ects' in text:
-        if num >= 90:  return 'Bachelor'
-        elif num >= 50: return 'Associate'
-        else:          return 'Diploma'
+        if num < 20 or num > 240: return 'Bachelor'  # sanity check
+        if num >= 90:             return 'Bachelor'
+        elif num >= 50:           return 'Associate'
+        else:                     return 'Diploma'
 
     return 'Bachelor'
 
 
+def normalise_programme_name(name):
+    """
+    Convert raw scraped names to standard formatted names.
+    'Bachelor of Science in Accounting'  → 'BSc in Accounting'
+    'Accounting (B.S.)'                  → 'BSc in Accounting'
+    'BA in Anthropology'                 → 'BA in Anthropology'  (unchanged)
+    """
+    name_stripped = name.strip()
+
+    # Pattern: "Subject (B.X.)" — e.g. "Accounting (B.S.)"
+    abbrev_suffix = re.match(
+        r'^(.+?)\s*\((B\.S\.|B\.A\.|B\.F\.A\.|B\.B\.A\.|B\.Arch\.?|'
+        r'B\.S\.N\.|B\.S\.W\.|B\.Mus\.?|B\.E\.|BFA|BBA|BArch|BSN|BSW|BMus|BS|BA)\s*'
+        r'(?:in\s+.+?)?\)$',
+        name_stripped, re.I
+    )
+    if abbrev_suffix:
+        subject = abbrev_suffix.group(1).strip()
+        raw_abbrev = abbrev_suffix.group(2).lower().replace('.', '').replace(' ', '')
+        abbrev_map = {
+            'bs': 'BSc', 'ba': 'BA', 'bfa': 'BFA', 'bba': 'BBA',
+            'barch': 'BArch', 'bsn': 'BSN', 'bsw': 'BSW', 'bmus': 'BMus',
+            'be': 'BEng',
+        }
+        short = abbrev_map.get(raw_abbrev, raw_abbrev.upper())
+        return f"{short} in {subject.title()}"
+
+    # Pattern: "Bachelor of X in Subject" or "Bachelor of X Subject" (no 'in')
+    full_match = re.match(
+        r'(bachelor of (?:arts|science|fine arts|business administration|'
+        r'applied science|music|nursing|social work|laws|technology|'
+        r'commerce|education|architecture|pharmacy|engineering|design|'
+        r'public health|social science|information technology|'
+        r'environmental science|international studies|urban planning))'
+        r'(?:\s+in\s+(.+)|\s+(.+))?$',
+        name_stripped, re.I
+    )
+    if full_match:
+        degree_type = full_match.group(1)
+        subject = (full_match.group(2) or full_match.group(3) or '').strip() or None
+        if subject:
+            subject = subject.strip()
+        return format_programme_name(degree_type, subject)
+
+    # Pattern: "Bachelor's Degree in X" — fix apostrophe if mangled by .title()
+    bachelors_match = re.match(
+        r"bachelor'?s?\s+degree\s+in\s+(.+)$", name_stripped, re.I
+    )
+    if bachelors_match:
+        subject = bachelors_match.group(1).strip().title()
+        return f"Bachelor's Degree in {subject}"
+
+    return name_stripped
+
+
 def format_unclear_degree(subject, level):
-    """
-    Format when degree type is not explicitly stated.
-    Uses inferred level written in full.
-    """
+    """Format when degree type is not explicitly stated."""
     subject_title = subject.title() if subject else 'General Studies'
-    if level == 'Bachelor':
-        return f"Bachelor's Degree in {subject_title}"
-    elif level == 'Associate':
-        return f"Associate Degree in {subject_title}"
-    elif level == 'Diploma':
-        return f"Diploma in {subject_title}"
+    if level == 'Bachelor':   return f"Bachelor's Degree in {subject_title}"
+    elif level == 'Associate': return f"Associate Degree in {subject_title}"
+    elif level == 'Diploma':   return f"Diploma in {subject_title}"
     return f"Bachelor's Degree in {subject_title}"
 
 
 # ─────────────────────────────────────────────────────────
-# INCLUDE / EXCLUDE LOGIC
+# MAIN INCLUDE / EXCLUDE LOGIC
 # ─────────────────────────────────────────────────────────
-
-def is_nav_noise(name):
-    name_lower = name.lower().strip()
-    if len(name_lower) < 5:
-        return True
-    if name_lower.startswith('http') or name_lower.count('/') > 1:
-        return True
-    for noise in NAV_NOISE:
-        if name_lower == noise:
-            return True
-    return False
-
 
 def should_include(programme_name):
     """
@@ -326,30 +344,72 @@ def should_include(programme_name):
     True  = include
     False = exclude
     None  = subject name only — needs degree type lookup
+
+    Uses three layers:
+    1. Universal quality checks (name_quality.py)
+    2. Project-level exclusions (PROJECT_RULES.md)
+    3. Degree type keyword matching
     """
     name_lower = programme_name.lower().strip()
 
-    if is_nav_noise(programme_name):
-        return False, "Nav noise"
+    # Layer 1 — Universal quality checks
+    quality, reason = should_include_by_quality(programme_name)
+    if quality == 'exclude':
+        return False, reason
 
-    for keyword in EXCLUDE_KEYWORDS:
+    # Layer 2 — Project-level exclusions (Masters, PhD, etc.)
+    for keyword in PROJECT_EXCLUSIONS:
         if keyword in name_lower:
-            return False, f"Excluded: '{keyword}'"
+            return False, f"Project exclusion: '{keyword}'"
+
+    # Layer 3 — Degree type keywords
+    if quality == 'include':
+        return True, 'Degree keyword detected'
 
     for keyword in INCLUDE_DEGREE_TYPES:
         if keyword in name_lower:
-            return True, "Included"
+            return True, 'Included'
 
-    return None, "Subject name only — needs degree type lookup"
+    # Unknown — subject name only
+    return None, 'Subject name only — needs degree type lookup'
 
 
-def get_nmc_flag(programme_name, medium="English"):
+def get_nmc_flag(programme_name, medium="English", country="Unknown"):
+    """
+    Determine NMC flag universally.
+    Logic:
+    - Specific language requirements → Yes
+    - Architecture 5yr → Yes
+    - Medicine → Yes
+    - Associate/community college → Yes (verify eligibility)
+    - Unclear degree level (Bachelor's Degree in X format, English) → No
+    - Everything else English-medium → No
+    """
     name_lower = programme_name.lower()
     medium_lower = medium.lower()
-    for reason, triggers in NMC_TRIGGERS.items():
+
+    # Specific NMC triggers
+    for trigger_reason, triggers in NMC_TRIGGERS.items():
         for trigger in triggers:
             if trigger in name_lower or trigger in medium_lower:
-                return "Yes", reason
+                return "Yes", trigger_reason
+
+    # Unclear degree type but English medium — still NMC: No
+    # because we know it IS a bachelor's/associate/diploma,
+    # just not the exact abbreviation
+    if "bachelor's degree in" in name_lower and medium_lower == 'english':
+        return "No", ""
+
+    if "associate degree in" in name_lower:
+        return "Yes", "Associate degree — verify eligibility"
+
+    if "diploma in" in name_lower and medium_lower != 'english':
+        return "Yes", "Non-English diploma"
+
+    # Non-English medium → always NMC: Yes
+    if medium_lower not in ('english', 'en', ''):
+        return "Yes", f"Non-English medium: {medium}"
+
     return "No", ""
 
 
@@ -367,10 +427,7 @@ def get_degree_level(programme_name):
     ]
 
     for k in diploma_keywords:
-        if k in name_lower:
-            return 'Diploma'
+        if k in name_lower: return 'Diploma'
     for k in associate_keywords:
-        if k in name_lower:
-            return 'Associate'
-
+        if k in name_lower: return 'Associate'
     return 'Bachelor'
